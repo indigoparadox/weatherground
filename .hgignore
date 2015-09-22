@@ -1,0 +1,10 @@
+syntax: glob
+WeatherGround/obj
+WeatherGround/bin
+WeatherThumb/bin
+WeatherThumb/obj
+WeatherTray/bin
+WeatherTray/obj
+.vs/WeatherTray/v14/.suo
+**.Identifier:$DATA
+**.attributes:$DATA
