@@ -79,6 +79,7 @@
             this.Controls.Add(this.label1);
             this.Name = "WeatherOptions";
             this.Text = "WeatherOptions";
+            this.Load += new System.EventHandler(this.WeatherOptions_Load);
             this.ResumeLayout(false);
             this.PerformLayout();
 
