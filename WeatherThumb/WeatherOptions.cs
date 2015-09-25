@@ -29,5 +29,9 @@ namespace WeatherThumb {
         private void buttonCancel_Click( object sender, EventArgs e ) {
             this.Close();
         }
+
+        private void WeatherOptions_Load( object sender, EventArgs e ) {
+            textZipCode.Text = Properties.Settings.Default.ZipCode;
+        }
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,16 +14,32 @@ using WeatherGround;
 namespace WeatherThumb {
     public partial class WeatherThumb : Form {
 
-        public static readonly int SYSMENU_REFRESH_ID = 0x1;
-        public static readonly int SYSMENU_OPTIONS_ID = 0x2;
-        public static readonly int SYSMENU_WUNDERGROUND_ID = 0x3;
+        public const int SYSMENU_REFRESH_ID = 0x1;
+        public const int SYSMENU_OPTIONS_ID = 0x2;
+        public const int SYSMENU_WUNDERGROUND_ID = 0x3;
 
         protected WeatherGroundUnder checker = null;
         protected Bitmap pictureBitmap = null;
         protected Timer checkTimer = new Timer();
+        protected Brush backgroundColor = Brushes.AliceBlue;
+        protected uint thumbBoxSize = 128;
 
         public WeatherThumb() {
             InitializeComponent();
+
+            int iTrue = 1;
+            ThumbnailAPI.DwmSetWindowAttribute(
+                this.Handle,
+                ThumbnailAPI.DWMWINDOWATTRIBUTE.DWMWA_FORCE_ICONIC_REPRESENTATION,
+                ref iTrue,
+                sizeof( int )
+            );
+            ThumbnailAPI.DwmSetWindowAttribute(
+                this.Handle,
+                ThumbnailAPI.DWMWINDOWATTRIBUTE.DWMWA_HAS_ICONIC_BITMAP,
+                ref iTrue,
+                sizeof( int )
+            );
 
             this.UpdateZipCode();
         }
@@ -54,14 +71,24 @@ namespace WeatherThumb {
             using( Graphics g = Graphics.FromImage( iconBitmap ) ) {
                 Font tempFont = new Font( "Arial", 64 );
                 SizeF tempSize = g.MeasureString( response.Temperature, tempFont );
-                iconComplete = new Bitmap( iconBitmap.Width + tempFont.Height, iconBitmap.Height + tempFont.Height );
+                iconComplete = new Bitmap( iconBitmap.Width + tempFont.Height, iconBitmap.Height + tempFont.Height, PixelFormat.Format32bppRgb );
                 using( Graphics cg = Graphics.FromImage( iconComplete ) ) {
+                    cg.FillRectangle(
+                        this.backgroundColor,
+                        new Rectangle(
+                            0,
+                            0,
+                            iconComplete.Width,
+                            iconComplete.Height
+                        )
+                    );
                     cg.DrawImageUnscaled(
                         iconBitmap,
                         new Point( (iconComplete.Width / 2) - (iconBitmap.Width / 2), 0 )
                     );
+                    /*
                     cg.FillRectangle(
-                        Brushes.White,
+                        this.backgroundColor,
                         new Rectangle(
                             0,
                             iconComplete.Height - (int)tempSize.Height,
@@ -69,6 +96,7 @@ namespace WeatherThumb {
                             (int)tempSize.Height
                         )
                     );
+                    */
                     cg.DrawString(
                         response.Temperature,
                         tempFont,
@@ -93,13 +121,35 @@ namespace WeatherThumb {
             //this.pictureBitmap = GetWeatherBitmap( response.Conditions );
             //this.pictureBitmap.MakeTransparent();
 
+            ThumbnailAPI.DwmInvalidateIconicBitmaps( this.Handle );
             this.Invalidate();
             this.Update();
             this.Refresh();
             Application.DoEvents();
         }
 
+        protected Bitmap GenerateScaledBitmap( Bitmap bitmap, uint width, uint height ) {
+            float scale = Math.Min( (float)width / bitmap.Width, (float)height / bitmap.Height );
+            int scaleWidth = (int)(bitmap.Width * scale);
+            int scaleHeight = (int)(bitmap.Height * scale);
+            Bitmap temp = new Bitmap( (int)width, (int)height );
+            using( Graphics g = Graphics.FromImage( temp ) ) {
+                g.FillRectangle( this.backgroundColor, 0, 0, width, height );
+                g.DrawImage(
+                    bitmap,
+                    new Rectangle(
+                        (int)((width / 2) - (scaleWidth / 2)),
+                        (int)((height / 2) - (scaleHeight / 2)),
+                        scaleWidth,
+                        scaleHeight
+                    )
+                );
+            }
+            return temp;
+        }
+
         protected override void OnPaintBackground( PaintEventArgs e ) {
+            e.Graphics.FillRectangle( this.backgroundColor, new Rectangle( 0, 0, this.Width, this.Height ) );
             if( null != this.pictureBitmap ) {
                 e.Graphics.DrawImage( pictureBitmap, new Rectangle( 12, 12, 128, 128 ), new Rectangle( 0, 0, this.pictureBitmap.Width, this.pictureBitmap.Height ), GraphicsUnit.Pixel );
             }
@@ -171,19 +221,63 @@ namespace WeatherThumb {
             ThumbnailAPI.AppendMenu( hSysMenu, ThumbnailAPI.MF_STRING, SYSMENU_WUNDERGROUND_ID, "Open &Wunderground…" );
         }
 
+        protected void OnThumbnail( uint width, uint height ) {
+            this.thumbBoxSize = height;
+            Bitmap temp = GenerateScaledBitmap( this.pictureBitmap, width, height );
+            ThumbnailAPI.DwmSetIconicThumbnail( this.Handle, temp.GetHbitmap(), 0 );
+        }
+
+        protected void OnLivePreview( uint width, uint height ) {
+            if( 0 >= width || 0 >= height ) {
+                width = this.thumbBoxSize;
+                height = this.thumbBoxSize;
+            }
+            Bitmap temp = GenerateScaledBitmap( this.pictureBitmap, width, height );
+            ThumbnailAPI.DwmSetIconicLivePreviewBitmap( this.Handle, temp.GetHbitmap(), IntPtr.Zero, 0 );
+        }
+
+        protected void OnCommand( int wParam ) {
+            switch( wParam ) {
+                case SYSMENU_REFRESH_ID:
+                    this.UpdateWeather();
+                    break;
+
+                case SYSMENU_OPTIONS_ID:
+                    new WeatherOptions( this ).ShowDialog();
+                    break;
+
+                case SYSMENU_WUNDERGROUND_ID:
+                    System.Diagnostics.Process.Start(
+                        String.Format( "http://www.wunderground.com/cgi-bin/findweather/getForecast?query={0}&MR=1", this.checker.ZipCode )
+                    );
+                    break;
+
+                case ThumbnailAPI.SC_RESTORE:
+                    System.Diagnostics.Process.Start(
+                        String.Format( "http://www.wunderground.com/cgi-bin/findweather/getForecast?query={0}&MR=1", this.checker.ZipCode )
+                    );
+                    return;
+            }
+        }
+
         protected override void WndProc( ref Message m ) {
             base.WndProc( ref m );
 
-            // Test if the About item was selected from the system menu
-            if( (ThumbnailAPI.WM_SYSCOMMAND == m.Msg) && (SYSMENU_REFRESH_ID == (int)m.WParam) ) {
-                this.UpdateWeather();
-            } else if( (ThumbnailAPI.WM_SYSCOMMAND == m.Msg) && (SYSMENU_OPTIONS_ID == (int)m.WParam) ) {
-                new WeatherOptions( this ).ShowDialog();
-            } else if( (ThumbnailAPI.WM_SYSCOMMAND == m.Msg) && (SYSMENU_WUNDERGROUND_ID == (int)m.WParam) ) {
-                System.Diagnostics.Process.Start(
-                    String.Format( "http://www.wunderground.com/cgi-bin/findweather/getForecast?query={0}&MR=1", this.checker.ZipCode )
-                );
+            switch( m.Msg ) {
+                case ThumbnailAPI.WM_SYSCOMMAND:
+                    this.OnCommand( (int)m.WParam );
+                    break;
+
+                case ThumbnailAPI.WM_DWMSENDICONICTHUMBNAIL:
+                    this.OnThumbnail( ThumbnailAPI.HIWORD( (uint)m.LParam ), ThumbnailAPI.LOWORD( (uint)m.LParam ) );
+                    break;
+
+                case ThumbnailAPI.WM_DWMSENDICONICLIVEPREVIEWBITMAP:
+                    this.OnLivePreview( ThumbnailAPI.HIWORD( (uint)m.LParam ), ThumbnailAPI.LOWORD( (uint)m.LParam ) );
+                    break;
             }
+
+            base.WndProc( ref m );
         }
     }
 }
